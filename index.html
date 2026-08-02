@@ -127,98 +127,212 @@
 
     <!-- Script de Python ejecutado por PyScript -->
     <script type="py">
-import numpy as np
+#   ACTIVIDAD FASE 3. Construir y desplegar una aplicación de inteligencia
+# artificial capaz de recibir datos y devolver información relevante de estos.
+#   Marcos Rafael Martínez Cosío 7290201
+#   Clase 20.1 Fundamentos y aplicaciones de la Inteligencia Artificial
+#   Monterrey, N.L. 02 Agosto 2026
+#   Este notebook se encuentra compartido en:
+
+# 1. Importar librerias y configurar entorno
+import os
 import pandas as pd
+import numpy as np
 import matplotlib.pyplot as plt
 from sklearn.ensemble import RandomForestRegressor
-from pyscript import window, display
+from sklearn.metrics import mean_absolute_error, r2_score
+import gradio as gr
+from datetime import datetime
+from dateutil.relativedelta import relativedelta
 
-# 1. Simulación/Carga de Datos Históricos (Reemplazo de Google Drive)
-# Para producción en GitHub, sustituye con la URL raw de tu CSV en GitHub
-try:
-    # Ejemplo con URL Pública en Github
-    # url_csv = "https://raw.githubusercontent.com/tu-usuario/tu-repo/main/tempmedia_conagua_01.csv"
-    # df_raw = pd.read_csv(url_csv)
-    
-    # Datos sintéticos estructurados para inicialización en navegador
-    fechas = pd.date_range(start='2010-01-01', end='2026-06-01', freq='MS')
-    np.random.seed(42)
-    temperaturas = 20 + 8 * np.sin(np.pi * fechas.month / 6) + np.random.normal(0, 1.5, len(fechas))
-    df = pd.DataFrame({'temperatura': temperaturas}, index=fechas)
-except Exception as e:
-    display(f"Error al cargar datos: {e}", target="plot-output")
+# Montar carpeta compartida en MyDrive
+from google.colab import drive
+drive.mount('/content/drive')
 
-# 2. Ingeniería de Características
-df['mes'] = df.index.month
-df['año'] = df.index.year
-df['temp_mes_anterior'] = df['temperatura'].shift(1)
-df['temp_hace_2meses'] = df['temperatura'].shift(2)
-df['temp_hace_3meses'] = df['temperatura'].shift(3)
-df['temp_media_7meses'] = df['temperatura'].shift(1).rolling(window=7).mean()
+# Definir el archivo de trabajo
+mydrive_compartido = '/content/drive/MyDrive/master_ai/data1/tempmedia_conagua_01.csv'
+
+print("Entorno listo para trabajar con archivos")
+
+# 2. Cargar el dataframe
+df = pd.read_csv(mydrive_compartido)
+
+print("Archivo CSV cargado correctamente")
+display(df.head())
+
+# 3. Transformar las columnas de meses en filas
+df_melted = df.melt(id_vars=['AÑO'], var_name='Mes', value_name='temperatura')
+
+# Mapear los nombres de los meses a números (Ej: 'ENE' a 1, 'FEB' a 2)
+meses_map = {
+    'ENE': 1, 'FEB': 2, 'MAR': 3, 'ABR': 4, 'MAY': 5, 'JUN': 6,
+    'JUL': 7, 'AGO': 8, 'SEP': 9, 'OCT': 10, 'NOV': 11, 'DIC': 12
+}
+df_melted['Mes'] = df_melted['Mes'].map(meses_map)
+
+# Crear una columna 'fecha' combinando 'AÑO' y 'Mes'
+df_melted['fecha'] = pd.to_datetime(df_melted[['AÑO', 'Mes']].assign(Dia=1).rename(columns={'AÑO': 'year', 'Mes': 'month', 'Dia': 'day'}))
+
+# Establecer 'fecha' como índice y ordenar el DataFrame
+df = df_melted.set_index('fecha').sort_index()
+
+# Seleccionar solo la columna 'temperatura' para el análisis posterior
+df = df[['temperatura']]
+
+# Eliminar filas con valores NaN que pudieran resultar de la transformación o datos faltantes
 df.dropna(inplace=True)
 
-# 3. Entrenamiento del Modelo
-X = df[['mes', 'año', 'temp_mes_anterior', 'temp_hace_2meses', 'temp_hace_3meses', 'temp_media_7meses']]
+# Mostrar el inicio del DataFrame transformado
+display(df.head())
+
+# 4. Ingeniería de Características (Feature Engineering)
+# Extraemos información temporal clave
+df['mes'] = df.index.month
+df['año'] = df.index.year # Extraer el año
+
+# Creamos "Lags" anuales (valores de años anteriores para dar contexto de secuencia)
+df['temp_hace_1año'] = df['temperatura'].shift(12)
+df['temp_hace_2años'] = df['temperatura'].shift(24)
+df['temp_hace_3años'] = df['temperatura'].shift(36)
+df['temp_hace_4años'] = df['temperatura'].shift(48)
+df['temp_hace_5años'] = df['temperatura'].shift(60)
+
+# Media móvil de los últimos 10 años (120 meses). Se usa .shift(1) para evitar la fuga de datos.
+df['temp_media_10años'] = df['temperatura'].shift(1).rolling(window=120).mean()
+
+# Eliminamos filas con NaN generadas por los shifts y la media móvil (el mayor shift es de 120 meses)
+df.dropna(inplace=True)
+
+# 5. Definir Variables de Entrada (X) y Objetivo (y) con las nuevas características
+X = df[['mes', 'año', 'temp_hace_1año', 'temp_hace_2años', 'temp_hace_3años', 'temp_hace_4años', 'temp_hace_5años', 'temp_media_10años']]
 y = df['temperatura']
 
-modelo_rf = RandomForestRegressor(n_estimators=50, max_depth=10, random_state=42)
-modelo_rf.fit(X, y)
+# 6. División de datos respetando la línea temporal (Train / Test Split)
+# No usamos train_test_split aleatorio para no "contaminar" el futuro con el pasado
+split_point = int(len(df) * 0.8)
+X_train, X_test = X.iloc[:split_point], X.iloc[split_point:]
+y_train, y_test = y.iloc[:split_point], y.iloc[split_point:]
 
-# 4. Helper Function para calcular lags
+# 7. Entrenamiento del modelo Random Forest
+# El modelo se entrena con características mensuales (lags y media móvil de meses anteriores).
+modelo_rf = RandomForestRegressor(
+    n_estimators=100,     # Número de árboles en el bosque
+    max_depth=10,         # Profundidad máxima para evitar sobreajuste
+    random_state=42,
+    n_jobs=-1             # Usa todos los núcleos disponibles en Colab
+)
+
+modelo_rf.fit(X_train, y_train)
+
+# 8. Evaluación de Predicciones
+predicciones = modelo_rf.predict(X_test)
+
+mae = mean_absolute_error(y_test, predicciones)
+r2 = r2_score(y_test, predicciones)
+
+print(f"--- Métricas del Modelo ---")
+print(f"Error Absoluto Medio (MAE): {mae:.2f} °C")
+print(f"Coeficiente de Determinación (R²): {r2:.2f}")
+
+# 9. Importancia de las Características
+# Asegurarse de que X esté definido con las características actualizadas antes de ejecutar esto
+importancias = pd.Series(modelo_rf.feature_importances_, index=X.columns).sort_values(ascending=True)
+print("\n--- Importancia de Variables ---")
+print(importancias)
+
+# 10. Interfaz Gradio para Predicción
+# --- Función auxiliar para calcular características para un mes objetivo dado ---
 def get_features_for_prediction(current_df_history, target_year, target_month):
-    target_date = pd.to_datetime(f"{target_year}-{target_month:02d}-01")
+    target_date = pd.to_datetime(f"{target_year}-{target_month}-01")
+
+    # Asegurarse de que current_df_history esté ordenado por fecha y tenga un DatetimeIndex
+    current_df_history = current_df_history.sort_index()
+    if not isinstance(current_df_history.index, pd.DatetimeIndex):
+        raise ValueError("current_df_history must have a DatetimeIndex")
+
+    # Obtener datos hasta el mes *anterior* al mes objetivo para los lags
     data_for_lags = current_df_history[current_df_history.index < target_date]
 
     if data_for_lags.empty:
-        return None
+        return None # No hay suficiente historial para calcular los lags
 
-    temp_mes_anterior = data_for_lags['temperatura'].iloc[-1]
-    temp_hace_2meses = data_for_lags['temperatura'].iloc[-2] if len(data_for_lags) >= 2 else np.nan
-    temp_hace_3meses = data_for_lags['temperatura'].iloc[-3] if len(data_for_lags) >= 3 else np.nan
-    
-    temps_7m = data_for_lags['temperatura'].iloc[-7:]
-    temp_media_7meses = temps_7m.mean() if len(temps_7m) == 7 else np.nan
+    # Calcular lags anuales basados en la columna 'temperatura' de los datos históricos
+    temp_hace_1año = data_for_lags['temperatura'].iloc[-12] if len(data_for_lags) >= 12 else np.nan
+    temp_hace_2años = data_for_lags['temperatura'].iloc[-24] if len(data_for_lags) >= 24 else np.nan
+    temp_hace_3años = data_for_lags['temperatura'].iloc[-36] if len(data_for_lags) >= 36 else np.nan
+    temp_hace_4años = data_for_lags['temperatura'].iloc[-48] if len(data_for_lags) >= 48 else np.nan
+    temp_hace_5años = data_for_lags['temperatura'].iloc[-60] if len(data_for_lags) >= 60 else np.nan
 
-    features_df = pd.DataFrame([{
-        'mes': target_month,
-        'año': target_year,
-        'temp_mes_anterior': temp_mes_anterior,
-        'temp_hace_2meses': temp_hace_2meses,
-        'temp_hace_3meses': temp_hace_3meses,
-        'temp_media_7meses': temp_media_7meses
-    }])
+    # Calcular la media móvil de 10 años (120 meses).
+    temps_for_rolling_mean = data_for_lags['temperatura'].iloc[-120:]
+    temp_media_10años = temps_for_rolling_mean.mean() if len(temps_for_rolling_mean) >= 120 else np.nan
+
+    mes = target_month
+    año = target_year
+
+    # Crear un DataFrame para la entrada de predicción, asegurando el orden correcto de las columnas como X_train
+    features_df = pd.DataFrame([
+        {
+            'mes': mes,
+            'año': año,
+            'temp_hace_1año': temp_hace_1año,
+            'temp_hace_2años': temp_hace_2años,
+            'temp_hace_3años': temp_hace_3años,
+            'temp_hace_4años': temp_hace_4años,
+            'temp_hace_5años': temp_hace_5años,
+            'temp_media_10años': temp_media_10años
+        }
+    ])
+
+    if features_df.isnull().any().any():
+        return None # Indicar fallo si alguna característica crítica es NaN
 
     return features_df
 
-# 5. Función principal gatillada por el botón HTML
-def ejecutar_prediccion(event):
-    # Leer valores de la interfaz HTML
-    año_inicio = int(window.document.getElementById("anio_start").value)
-    mes_inicio = int(window.document.getElementById("mes_start").value)
-    temp_observada_inicio = float(window.document.getElementById("temp_obs").value)
+# --- Función de predicción de Gradio ---
+def predecir_temperatura_futura(año_inicio, mes_inicio, temp_observada_inicio):
+    global df, modelo_rf # Acceder a las variables globales df y modelo_rf
 
+    # Hacer una copia del DataFrame global para evitar modificarlo
+    # Solo necesitamos la columna 'temperatura' del DataFrame después de la ingeniería de características.
     df_for_forecasting = df[['temperatura']].copy()
-    forecast_start_date = pd.to_datetime(f"{año_inicio}-{mes_inicio:02d}-01")
 
-    # Añadir dato inicial
+    # Asegurarse de que el punto de inicio de la previsión sea posterior al último punto de datos conocido en el DataFrame
+    last_known_date = df_for_forecasting.index.max()
+    forecast_start_date = pd.to_datetime(f"{año_inicio}-{mes_inicio}-01")
+
+    if forecast_start_date <= last_known_date:
+        return None, "Error: La fecha de inicio de la predicción debe ser posterior al último dato disponible en el entrenamiento."
+
+    # Añadir la temperatura observada inicial al dataframe de pronóstico
     new_entry_data = pd.DataFrame({'temperatura': [temp_observada_inicio]}, index=[forecast_start_date])
     df_for_forecasting = pd.concat([df_for_forecasting, new_entry_data]).sort_index()
 
-    # Fechas de predicción
+    # Preparar para predicciones hasta diciembre de 2030
     end_date_forecast = pd.to_datetime("2030-12-01")
-    current_date = forecast_start_date + pd.DateOffset(months=1)
+    # Comenzar a predecir desde el mes *después* de la temperatura observada inicial
+    current_date = forecast_start_date + relativedelta(months=1)
 
     predictions_list = []
 
+    # Iterar mes a mes para predecir
     while current_date <= end_date_forecast:
+        # Calcular características para el mes actual basándose en el historial extendido
         features = get_features_for_prediction(df_for_forecasting, current_date.year, current_date.month)
-        
+
         if features is None or features.isnull().any().any():
-            current_date += pd.DateOffset(months=1)
+            predictions_list.append({
+                'fecha': current_date,
+                'temperatura': np.nan,
+                'observada_o_pronosticada': 'Error en el cálculo de features'
+            })
+            current_date += relativedelta(months=1)
             continue
 
+        # Realizar predicción
         predicted_temp = modelo_rf.predict(features)[0]
 
+        # Añadir la predicción a nuestro `df_for_forecasting` para cálculos de lag subsiguientes
         df_for_forecasting = pd.concat([
             df_for_forecasting,
             pd.DataFrame({'temperatura': [predicted_temp]}, index=[current_date])
@@ -226,37 +340,71 @@ def ejecutar_prediccion(event):
 
         predictions_list.append({
             'fecha': current_date,
-            'temperatura': predicted_temp
+            'temperatura': predicted_temp,
+            'observada_o_pronosticada': 'Pronosticada'
         })
 
-        current_date += pd.DateOffset(months=1)
+        current_date += relativedelta(months=1) # Mover al siguiente mes
 
-    predictions_df = pd.DataFrame(predictions_list).set_index('fecha')
+    predictions_df = pd.DataFrame(predictions_list)
+    predictions_df.set_index('fecha', inplace=True)
 
-    # Generación de la Gráfica
-    fig, ax = plt.subplots(figsize=(10, 5))
-    ax.plot(df_for_forecasting.index, df_for_forecasting['temperatura'], label='Histórico + Pronóstico', color='#1f77b4')
-    ax.scatter(forecast_start_date, temp_observada_inicio, color='green', s=80, zorder=5, label='Temp. Observada Inicial')
-    ax.plot(predictions_df.index, predictions_df['temperatura'], label='Pronóstico RF', color='red', linestyle='--')
+    # Gráficos
+    fig = plt.figure(figsize=(12, 6))
+    plt.plot(df_for_forecasting.index, df_for_forecasting['temperatura'], label='Temperaturas (Históricas + Observada + Pronosticadas)', color='blue')
 
-    ax.set_title('Pronóstico de Temperatura Mensual (Hasta 2030)')
-    ax.set_xlabel('Fecha')
-    ax.set_ylabel('Temperatura (°C)')
-    ax.grid(True, linestyle=':', alpha=0.6)
-    ax.legend()
+    # Resaltar la temperatura inicial observada
+    plt.scatter(forecast_start_date, temp_observada_inicio, color='green', s=100, zorder=5, label='Temperatura Observada Inicial')
+
+    # Resaltar el rango pronosticado
+    predicted_dates = predictions_df.index
+    predicted_values = predictions_df['temperatura']
+    plt.plot(predicted_dates, predicted_values, label='Temperaturas Pronosticadas', color='red', linestyle='--')
+
+    plt.title('Pronóstico de Temperatura Mensual hasta Diciembre de 2030')
+    plt.xlabel('Fecha')
+    plt.ylabel('Temperatura (°C)')
+    plt.grid(True)
+    plt.legend()
+    plt.xticks(rotation=45)
     plt.tight_layout()
 
-    # Renderizar limpia la salida en el contenedor objetivo
-    window.document.getElementById("plot-output").innerHTML = ""
-    display(fig, target="plot-output")
+    # Crear un texto de resumen
+    summary = f"Pronóstico iniciado con temperatura observada de {temp_observada_inicio:.2f}°C para {mes_inicio}/{año_inicio}.\n\n"
+    summary += "Temperaturas pronosticadas:\n"
+    for idx, row in predictions_df.iterrows():
+        summary += f"  {idx.strftime('%Y-%m')}: {row['temperatura']:.2f}°C\n"
 
-    # Mostrar resumen en texto
-    summary = f"Inicio: {mes_inicio}/{año_inicio} | Temp Inicial: {temp_observada_inicio}°C\n"
-    summary += f"Última temperatura pronosticada (2030-12): {predictions_df['temperatura'].iloc[-1]:.2f}°C"
-    window.document.getElementById("summary-output").innerText = summary
+    return fig, summary
 
-# Ejecutar una primera vez al cargar la página
-ejecutar_prediccion(None)
+# --- Definición de la Interfaz de Gradio ---
+# El DataFrame global tiene un índice máximo de 2026-06-01.
+# La solicitud es comenzar las predicciones a partir de julio de 2026.
+# Por lo tanto, el año mínimo para la entrada debe ser 2026.
+# El año máximo para la entrada puede ser 2030, ya que el pronóstico llega hasta entonces.
+min_year_input = 2026
+max_year_input = 2030
+min_temp_for_slider = float(df['temperatura'].min()) - 5
+max_temp_for_slider = float(df['temperatura'].max()) + 5
+
+interface = gr.Interface(
+    fn=predecir_temperatura_futura,
+    inputs=[
+        gr.Slider(minimum=min_year_input, maximum=max_year_input, step=1, value=2026, label="Año de inicio de la predicción"),
+        gr.Slider(minimum=1, maximum=12, step=1, value=7, label="Mes de inicio de la predicción (1=Ene, 12=Dic)"),
+        gr.Number(value=25.0, label="Temperatura Observada para el Mes de Inicio (°C)")
+    ],
+    outputs=[
+        gr.Plot(label="Gráfico de Pronóstico de Temperatura"),
+        gr.Textbox(label="Resumen de Pronósticos")
+    ],
+    title="Pronóstico Interactivo de Temperatura Mensual (Julio 2026 - Dic 2030)",
+    description="Ingrese el año, mes y la temperatura observada para el mes de inicio. El modelo predecirá las temperaturas mensuales hasta Diciembre de 2030, usando sus propias predicciones como entrada para los lags subsiguientes.",
+    live=False
+)
+
+# Lanzar la interfaz
+interface.launch(share=True)
     </script>
 
 </body>
