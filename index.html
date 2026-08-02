@@ -1,5 +1,3 @@
-HTML
-
 <!DOCTYPE html>
 <html lang="es">
 <head>
@@ -13,235 +11,214 @@ HTML
 
     <!-- Configuración de librerías de Python requeridas -->
     <py-config>
-        packages = ["matplotlib", "numpy", "pandas", "gradio"]
+        packages = ["matplotlib", "numpy", "pandas", "scikit-learn"]
     </py-config>
 
     <style>
         body {
             font-family: Arial, sans-serif;
-            max-width: 900px;
-            margin: 40px auto;
+            max-width: 950px;
+            margin: 20px auto;
             padding: 20px;
             text-align: center;
+            background-color: #f8f9fa;
+        }
+        .control-panel {
+            background: #ffffff;
+            padding: 20px;
+            border-radius: 8px;
+            box-shadow: 0 2px 5px rgba(0,0,0,0.1);
+            margin-bottom: 20px;
+            display: flex;
+            flex-wrap: wrap;
+            gap: 15px;
+            justify-content: center;
+            align-items: center;
+        }
+        .control-group {
+            display: flex;
+            flex-direction: column;
+            align-items: flex-start;
+        }
+        label {
+            font-size: 12px;
+            font-weight: bold;
+            margin-bottom: 5px;
+        }
+        input, select, button {
+            padding: 8px 12px;
+            border: 1px solid #ccc;
+            border-radius: 4px;
+        }
+        button {
+            background-color: #0d6efd;
+            color: white;
+            border: none;
+            cursor: pointer;
+            font-weight: bold;
+            margin-top: 18px;
+        }
+        button:hover {
+            background-color: #0b5ed7;
         }
         /* Contenedor donde se renderizan las salidas de los gráficos */
         #plot-output {
             margin-top: 20px;
+            background: white;
+            padding: 15px;
+            border-radius: 8px;
+            box-shadow: 0 2px 5px rgba(0,0,0,0.1);
+            min-height: 400px;
             display: flex;
             justify-content: center;
+            align-items: center;
+        }
+        #summary-output {
+            text-align: left;
+            background: #eef2f5;
+            padding: 15px;
+            border-radius: 6px;
+            font-family: monospace;
+            white-space: pre-wrap;
+            margin-top: 15px;
         }
     </style>
 </head>
 <body>
 
-    <h1>Resultados del Modelo</h1>
-    <p>Este gráfico se calcula y renderiza en tiempo real usando Python desde el navegador.</p>
+    <h1>Pronóstico Interactivo de Temperatura Mensual</h1>
+    <p>Modelo Random Forest ejecutado en tiempo real en el navegador.</p>
 
-    <!-- Div objetivo donde se renderizará únicamente la salida visual -->
-    <div id="plot-output">Cargando modelo y generando gráficos...</div>
+    <!-- Interfaz de Usuario Equivalente a Gradio en HTML -->
+    <div class="control-panel">
+        <div class="control-group">
+            <label for="anio_start">Año inicio:</label>
+            <input type="number" id="anio_start" value="2026" min="2026" max="2030">
+        </div>
+        <div class="control-group">
+            <label for="mes_start">Mes inicio:</label>
+            <select id="mes_start">
+                <option value="1">Enero</option>
+                <option value="2">Febrero</option>
+                <option value="3">Marzo</option>
+                <option value="4">Abril</option>
+                <option value="5">Mayo</option>
+                <option value="6">Junio</option>
+                <option value="7" selected>Julio</option>
+                <option value="8">Agosto</option>
+                <option value="9">Septiembre</option>
+                <option value="10">Octubre</option>
+                <option value="11">Noviembre</option>
+                <option value="12">Diciembre</option>
+            </select>
+        </div>
+        <div class="control-group">
+            <label for="temp_obs">Temp. Observada (°C):</label>
+            <input type="number" id="temp_obs" value="25.0" step="0.1">
+        </div>
+        <button py-click="ejecutar_prediccion">Calcular Pronóstico</button>
+    </div>
 
-    <!-- Script de Python oculto al usuario final -->
-    <script type="py" target="plot-output">
-# -*- coding: utf-8 -*-
+    <!-- Div objetivo donde se renderizará únicamente la salida visual del gráfico -->
+    <div id="plot-output">Cargando librerías y entrenando modelo... Por favor espere.</div>
+    
+    <!-- Resumen de texto -->
+    <div id="summary-output"></div>
 
-
-import os
-import pandas as pd
+    <!-- Script de Python ejecutado por PyScript -->
+    <script type="py">
 import numpy as np
+import pandas as pd
 import matplotlib.pyplot as plt
 from sklearn.ensemble import RandomForestRegressor
-from sklearn.metrics import mean_absolute_error, r2_score
+from pyscript import window, display
 
-# Montar carpeta compartida en MyDrive
-from google.colab import drive
-drive.mount('/content/drive')
+# 1. Simulación/Carga de Datos Históricos (Reemplazo de Google Drive)
+# Para producción en GitHub, sustituye con la URL raw de tu CSV en GitHub
+try:
+    # Ejemplo con URL Pública en Github
+    # url_csv = "https://raw.githubusercontent.com/tu-usuario/tu-repo/main/tempmedia_conagua_01.csv"
+    # df_raw = pd.read_csv(url_csv)
+    
+    # Datos sintéticos estructurados para inicialización en navegador
+    fechas = pd.date_range(start='2010-01-01', end='2026-06-01', freq='MS')
+    np.random.seed(42)
+    temperaturas = 20 + 8 * np.sin(np.pi * fechas.month / 6) + np.random.normal(0, 1.5, len(fechas))
+    df = pd.DataFrame({'temperatura': temperaturas}, index=fechas)
+except Exception as e:
+    display(f"Error al cargar datos: {e}", target="plot-output")
 
-# Definir el archivo de trabajo
-mydrive_compartido = '/content/drive/MyDrive/master_ai/data1/tempmedia_conagua_01.csv'
-
-print("Entorno listo para trabajar con archivos")
-
-df = pd.read_csv(mydrive_compartido)
-
-print("Archivo CSV cargado correctamente")
-display(df.head())
-
-# 1. Procesar dataset real con años como filas y meses como columnas
-# Asumimos que la columna del año se llama 'AÑO' y las columnas de los meses son 'ENE', 'FEB', ..., 'DIC'.
-
-# Derretir el DataFrame de formato ancho a formato largo
-# Esto transforma las columnas de meses en filas
-df_melted = df.melt(id_vars=['AÑO'], var_name='Mes', value_name='temperatura')
-
-# Mapear los nombres de los meses a números (Ej: 'ENE' a 1, 'FEB' a 2)
-meses_map = {
-    'ENE': 1, 'FEB': 2, 'MAR': 3, 'ABR': 4, 'MAY': 5, 'JUN': 6,
-    'JUL': 7, 'AGO': 8, 'SEP': 9, 'OCT': 10, 'NOV': 11, 'DIC': 12
-}
-df_melted['Mes'] = df_melted['Mes'].map(meses_map)
-
-# Crear una columna 'fecha' combinando 'AÑO' y 'Mes'
-# Renombrar las columnas a 'year', 'month', 'day' para que pd.to_datetime las reconozca
-df_melted['fecha'] = pd.to_datetime(df_melted[['AÑO', 'Mes']].assign(Dia=1).rename(columns={'AÑO': 'year', 'Mes': 'month', 'Dia': 'day'}))
-
-# Establecer 'fecha' como índice y ordenar el DataFrame
-df = df_melted.set_index('fecha').sort_index()
-
-# Seleccionar solo la columna 'temperatura' para el análisis posterior
-df = df[['temperatura']]
-
-# Eliminar filas con valores NaN que pudieran resultar de la transformación o datos faltantes
-df.dropna(inplace=True)
-
-# Mostrar el inicio del DataFrame transformado
-display(df.head())
-
-# 2. Ingeniería de Características (Feature Engineering)
-# Extraemos información temporal clave
+# 2. Ingeniería de Características
 df['mes'] = df.index.month
-df['año'] = df.index.year # Extraer el año
-
-# Creamos "Lags" (valores de meses anteriores para dar contexto de secuencia)
+df['año'] = df.index.year
 df['temp_mes_anterior'] = df['temperatura'].shift(1)
 df['temp_hace_2meses'] = df['temperatura'].shift(2)
 df['temp_hace_3meses'] = df['temperatura'].shift(3)
-
-# Media móvil de los últimos 7 meses
 df['temp_media_7meses'] = df['temperatura'].shift(1).rolling(window=7).mean()
-
-# Eliminamos filas con NaN generadas por los shifts
 df.dropna(inplace=True)
 
-# 3. Definir Variables de Entrada (X) y Objetivo (y)
+# 3. Entrenamiento del Modelo
 X = df[['mes', 'año', 'temp_mes_anterior', 'temp_hace_2meses', 'temp_hace_3meses', 'temp_media_7meses']]
 y = df['temperatura']
 
-# 4. División de datos respetando la línea temporal (Train / Test Split)
-# No usamos train_test_split aleatorio para no "contaminar" el futuro con el pasado
-split_point = int(len(df) * 0.8)
-X_train, X_test = X.iloc[:split_point], X.iloc[split_point:]
-y_train, y_test = y.iloc[:split_point], y.iloc[split_point:]
+modelo_rf = RandomForestRegressor(n_estimators=50, max_depth=10, random_state=42)
+modelo_rf.fit(X, y)
 
-# 5. Entrenamiento del modelo Random Forest
-# El modelo se entrena con características mensuales (lags y media móvil de meses anteriores).
-modelo_rf = RandomForestRegressor(
-    n_estimators=100,     # Número de árboles en el bosque
-    max_depth=10,         # Profundidad máxima para evitar sobreajuste
-    random_state=42,
-    n_jobs=-1             # Usa todos los núcleos disponibles en Colab
-)
-
-modelo_rf.fit(X_train, y_train)
-
-# 6. Evaluación de Predicciones
-predicciones = modelo_rf.predict(X_test)
-
-mae = mean_absolute_error(y_test, predicciones)
-r2 = r2_score(y_test, predicciones)
-
-print(f"--- Métricas del Modelo ---")
-print(f"Error Absoluto Medio (MAE): {mae:.2f} °C")
-print(f"Coeficiente de Determinación (R²): {r2:.2f}")
-
-# 7. Importancia de las Características
-importancias = pd.Series(modelo_rf.feature_importances_, index=X.columns).sort_values(ascending=True)
-print("\n--- Importancia de Variables ---")
-print(importancias)
-
-import gradio as gr
-import pandas as pd
-import numpy as np
-import matplotlib.pyplot as plt
-from datetime import datetime
-from dateutil.relativedelta import relativedelta
-
-# --- Helper function to calculate features for a given target month ---
+# 4. Helper Function para calcular lags
 def get_features_for_prediction(current_df_history, target_year, target_month):
-    target_date = pd.to_datetime(f"{target_year}-{target_month}-01")
-
-    # Ensure current_df_history is sorted by date and has a DatetimeIndex
-    current_df_history = current_df_history.sort_index()
-    if not isinstance(current_df_history.index, pd.DatetimeIndex):
-        raise ValueError("current_df_history must have a DatetimeIndex")
-
-    # Get data up to the month *before* the target month for lags
+    target_date = pd.to_datetime(f"{target_year}-{target_month:02d}-01")
     data_for_lags = current_df_history[current_df_history.index < target_date]
 
     if data_for_lags.empty:
-        return None # Not enough history to calculate lags
+        return None
 
-    # Calculate lags based on the 'temperatura' column from historical data
-    temp_mes_anterior = data_for_lags['temperatura'].iloc[-1] if len(data_for_lags) >= 1 else np.nan
+    temp_mes_anterior = data_for_lags['temperatura'].iloc[-1]
     temp_hace_2meses = data_for_lags['temperatura'].iloc[-2] if len(data_for_lags) >= 2 else np.nan
     temp_hace_3meses = data_for_lags['temperatura'].iloc[-3] if len(data_for_lags) >= 3 else np.nan
+    
+    temps_7m = data_for_lags['temperatura'].iloc[-7:]
+    temp_media_7meses = temps_7m.mean() if len(temps_7m) == 7 else np.nan
 
-    # Calculate 7-month rolling mean. For `target_date`, it's the mean of `temperatura` from
-    # `target_date - 7 months` to `target_date - 1 month`.
-    temps_for_rolling_mean = data_for_lags['temperatura'].iloc[-7:]
-    temp_media_7meses = temps_for_rolling_mean.mean() if len(temps_for_rolling_mean) == 7 else np.nan
-
-    mes = target_month
-    año = target_year
-
-    # Create a DataFrame for prediction input, ensuring correct column order as X_train
     features_df = pd.DataFrame([{
-        'mes': mes,
-        'año': año,
+        'mes': target_month,
+        'año': target_year,
         'temp_mes_anterior': temp_mes_anterior,
         'temp_hace_2meses': temp_hace_2meses,
         'temp_hace_3meses': temp_hace_3meses,
         'temp_media_7meses': temp_media_7meses
     }])
 
-    if features_df.isnull().any().any():
-        return None # Indicate failure if any critical feature is NaN
-
     return features_df
 
-# --- Gradio prediction function ---
-def predecir_temperatura_futura(año_inicio, mes_inicio, temp_observada_inicio):
-    global df, modelo_rf # Access global df and modelo_rf
+# 5. Función principal gatillada por el botón HTML
+def ejecutar_prediccion(event):
+    # Leer valores de la interfaz HTML
+    año_inicio = int(window.document.getElementById("anio_start").value)
+    mes_inicio = int(window.document.getElementById("mes_start").value)
+    temp_observada_inicio = float(window.document.getElementById("temp_obs").value)
 
-    # Make a copy of the global df to avoid modifying it
-    # We only need the 'temperatura' column from the df after feature engineering.
     df_for_forecasting = df[['temperatura']].copy()
+    forecast_start_date = pd.to_datetime(f"{año_inicio}-{mes_inicio:02d}-01")
 
-    # Ensure the starting point of forecasting is after the last known data point in df
-    last_known_date = df_for_forecasting.index.max()
-    forecast_start_date = pd.to_datetime(f"{año_inicio}-{mes_inicio}-01")
-
-    if forecast_start_date <= last_known_date:
-        return None, "Error: La fecha de inicio de la predicción debe ser posterior al último dato disponible en el entrenamiento."
-
-    # Add the initial observed temperature to the forecasting dataframe
+    # Añadir dato inicial
     new_entry_data = pd.DataFrame({'temperatura': [temp_observada_inicio]}, index=[forecast_start_date])
     df_for_forecasting = pd.concat([df_for_forecasting, new_entry_data]).sort_index()
 
-    # Prepare for predictions until December 2030
+    # Fechas de predicción
     end_date_forecast = pd.to_datetime("2030-12-01")
-    # Start predicting from the month *after* the initial observed temp
-    current_date = forecast_start_date + relativedelta(months=1)
+    current_date = forecast_start_date + pd.DateOffset(months=1)
 
     predictions_list = []
 
-    # Iterate month by month to predict
     while current_date <= end_date_forecast:
-        # Calculate features for the current month based on the extended history
         features = get_features_for_prediction(df_for_forecasting, current_date.year, current_date.month)
-
+        
         if features is None or features.isnull().any().any():
-            predictions_list.append({
-                'fecha': current_date,
-                'temperatura': np.nan,
-                'observada_o_pronosticada': 'Error en el cálculo de features'
-            })
-            current_date += relativedelta(months=1)
+            current_date += pd.DateOffset(months=1)
             continue
 
-        # Make prediction
         predicted_temp = modelo_rf.predict(features)[0]
 
-        # Add the prediction to our `df_for_forecasting` for subsequent lag calculations
         df_for_forecasting = pd.concat([
             df_for_forecasting,
             pd.DataFrame({'temperatura': [predicted_temp]}, index=[current_date])
@@ -249,89 +226,37 @@ def predecir_temperatura_futura(año_inicio, mes_inicio, temp_observada_inicio):
 
         predictions_list.append({
             'fecha': current_date,
-            'temperatura': predicted_temp,
-            'observada_o_pronosticada': 'Pronosticada'
+            'temperatura': predicted_temp
         })
 
-        current_date += relativedelta(months=1) # Move to the next month
+        current_date += pd.DateOffset(months=1)
 
-    predictions_df = pd.DataFrame(predictions_list)
-    predictions_df.set_index('fecha', inplace=True)
+    predictions_df = pd.DataFrame(predictions_list).set_index('fecha')
 
-    # Plotting
-    fig = plt.figure(figsize=(12, 6))
-    plt.plot(df_for_forecasting.index, df_for_forecasting['temperatura'], label='Temperaturas (Históricas + Observada + Pronosticadas)', color='blue')
+    # Generación de la Gráfica
+    fig, ax = plt.subplots(figsize=(10, 5))
+    ax.plot(df_for_forecasting.index, df_for_forecasting['temperatura'], label='Histórico + Pronóstico', color='#1f77b4')
+    ax.scatter(forecast_start_date, temp_observada_inicio, color='green', s=80, zorder=5, label='Temp. Observada Inicial')
+    ax.plot(predictions_df.index, predictions_df['temperatura'], label='Pronóstico RF', color='red', linestyle='--')
 
-    # Highlight the observed initial temperature
-    plt.scatter(forecast_start_date, temp_observada_inicio, color='green', s=100, zorder=5, label='Temperatura Observada Inicial')
-
-    # Highlight the predicted range
-    predicted_dates = predictions_df.index
-    predicted_values = predictions_df['temperatura']
-    plt.plot(predicted_dates, predicted_values, label='Temperaturas Pronosticadas', color='red', linestyle='--')
-
-    plt.title('Pronóstico de Temperatura Mensual hasta Diciembre de 2030')
-    plt.xlabel('Fecha')
-    plt.ylabel('Temperatura (°C)')
-    plt.grid(True)
-    plt.legend()
-    plt.xticks(rotation=45)
+    ax.set_title('Pronóstico de Temperatura Mensual (Hasta 2030)')
+    ax.set_xlabel('Fecha')
+    ax.set_ylabel('Temperatura (°C)')
+    ax.grid(True, linestyle=':', alpha=0.6)
+    ax.legend()
     plt.tight_layout()
 
-    # Create a summary text
-    summary = f"Pronóstico iniciado con temperatura observada de {temp_observada_inicio:.2f}°C para {mes_inicio}/{año_inicio}.\n\n"
-    summary += "Temperaturas pronosticadas:\n"
-    for idx, row in predictions_df.iterrows():
-        summary += f"  {idx.strftime('%Y-%m')}: {row['temperatura']:.2f}°C\n"
+    # Renderizar limpia la salida en el contenedor objetivo
+    window.document.getElementById("plot-output").innerHTML = ""
+    display(fig, target="plot-output")
 
-    return fig, summary
+    # Mostrar resumen en texto
+    summary = f"Inicio: {mes_inicio}/{año_inicio} | Temp Inicial: {temp_observada_inicio}°C\n"
+    summary += f"Última temperatura pronosticada (2030-12): {predictions_df['temperatura'].iloc[-1]:.2f}°C"
+    window.document.getElementById("summary-output").innerText = summary
 
-# --- Gradio Interface Definition ---
-# The global df has a max index of 2026-06-01.
-# The request is to start predictions from July 2026.
-# So, min_year for input should be 2026.
-# Max year for input can be 2030 as the forecast goes until then.
-min_year_input = 2026
-max_year_input = 2030
-min_temp_for_slider = float(df['temperatura'].min()) - 5
-max_temp_for_slider = float(df['temperatura'].max()) + 5
-
-interface = gr.Interface(
-    fn=predecir_temperatura_futura,
-    inputs=[
-        gr.Slider(minimum=min_year_input, maximum=max_year_input, step=1, value=2026, label="Año de inicio de la predicción"),
-        gr.Slider(minimum=1, maximum=12, step=1, value=7, label="Mes de inicio de la predicción (1=Ene, 12=Dic)"),
-        gr.Number(value=25.0, label="Temperatura Observada para el Mes de Inicio (°C)")
-    ],
-    outputs=[
-        gr.Plot(label="Gráfico de Pronóstico de Temperatura"),
-        gr.Textbox(label="Resumen de Pronósticos")
-    ],
-    title="Pronóstico Interactivo de Temperatura Mensual (Julio 2026 - Dic 2030)",
-    description="Ingrese el año, mes y la temperatura observada para el mes de inicio. El modelo predecirá las temperaturas mensuales hasta Diciembre de 2030, usando sus propias predicciones como entrada para los lags subsiguientes.",
-    live=False
-)
-
-# Launch the interface
-interface.launch(share=True)
-
-"""### Convertir el Cuaderno a HTML
-
-Para convertir este cuaderno (`.ipynb`) a un archivo HTML, puedes usar la herramienta `jupyter nbconvert`. Deberás especificar la ruta completa a tu archivo `.ipynb` y el nombre de salida para el archivo HTML.
-"""
-
-# Reemplaza 'nombre_de_tu_cuaderno.ipynb' con el nombre real de tu archivo de cuaderno
-# y asegura que la ruta sea correcta (por ejemplo, si está en MyDrive)
-# Por ejemplo: '/content/drive/MyDrive/MiProyecto/mi_cuaderno_de_temperatura.ipynb'
-
-notebook_path = '/content/drive/MyDrive/ColabNotebooks/pronostico_temp_mty.ipynb' # <--- ¡ACTUALIZA ESTA RUTA Y NOMBRE DE ARCHIVO!
-#/content/drive/MyDrive/Colab Notebooks/global_electricity_comprehensive.csv
-#https://colab.research.google.com/drive/1A-t3I1ryrjH3jrX9v7SAJa3oXZjCoUfd?usp=drive_link
-output_html_name = 'pronostico_temp_mty.html'
-
-!jupyter nbconvert --to html "{notebook_path}" --output "{output_html_name}"
-
-print(f"El archivo HTML '{output_html_name}' ha sido generado. Puedes descargarlo desde el explorador de archivos de Colab (panel izquierdo).")
+# Ejecutar una primera vez al cargar la página
+ejecutar_prediccion(None)
     </script>
 
 </body>
