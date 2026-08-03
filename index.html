@@ -154,8 +154,7 @@ fechas = pd.date_range(start='2010-01-01', end='2026-06-01', freq='MS')
 np.random.seed(42)
 temperaturas = 20 + 8 * np.sin(np.pi * fechas.month / 6) + np.random.normal(0, 1.5, len(fechas))
 df = pd.DataFrame({'temperatura': temperaturas}, index=fechas)
-except Exception as e:
-    display(f"Error al cargar datos: {e}", target="plot-output")
+
 
 # 2. Ingeniería de Características
 df['mes'] = df.index.month
