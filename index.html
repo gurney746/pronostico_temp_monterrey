@@ -144,14 +144,12 @@ import matplotlib.pyplot as plt
 from sklearn.ensemble import RandomForestRegressor
 from pyscript import window, display
 
-# 1. Simulación/Carga de Datos Históricos (Reemplazo de Google Drive)
-# Para producción en GitHub, sustituye con la URL raw de tu CSV en GitHub
-try:
-    # Ejemplo con URL Pública en Github
+# 1. Carga de Datos Históricos
+
     url_csv = "https://github.com/gurney746/pronostico_temp_monterrey/blob/main/tempmedia_conagua_01.csv"
     df_raw = pd.read_csv(url_csv)
     
-    # Datos sintéticos estructurados para inicialización en navegador
+    # Datos sintéticos estructurados 
     fechas = pd.date_range(start='2010-01-01', end='2026-06-01', freq='MS')
     np.random.seed(42)
     temperaturas = 20 + 8 * np.sin(np.pi * fechas.month / 6) + np.random.normal(0, 1.5, len(fechas))
