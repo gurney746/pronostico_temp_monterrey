@@ -148,8 +148,8 @@ from pyscript import window, display
 # Para producción en GitHub, sustituye con la URL raw de tu CSV en GitHub
 try:
     # Ejemplo con URL Pública en Github
-    # url_csv = "https://raw.githubusercontent.com/tu-usuario/tu-repo/main/tempmedia_conagua_01.csv"
-    # df_raw = pd.read_csv(url_csv)
+    url_csv = "https://github.com/gurney746/pronostico_temp_monterrey/blob/main/tempmedia_conagua_01.csv"
+    df_raw = pd.read_csv(url_csv)
     
     # Datos sintéticos estructurados para inicialización en navegador
     fechas = pd.date_range(start='2010-01-01', end='2026-06-01', freq='MS')
