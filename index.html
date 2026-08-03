@@ -1,11 +1,11 @@
 <!-- 
-#   ACTIVIDAD FASE 3. Construir y desplegar una aplicación de inteligencia
+#  ACTIVIDAD FASE 3. Construir y desplegar una aplicación de inteligencia
 # artificial capaz de recibir datos y devolver información relevante de estos.
-#   Marcos Rafael Martínez Cosío 7290201
-#   Clase 20.1 Fundamentos y aplicaciones de la Inteligencia Artificial
-#   Monterrey, N.L. 02 Agosto 2026
-#   Este notebook se encuentra compartido en:
-#     https://colab.research.google.com/drive/1A-t3I1ryrjH3jrX9v7SAJa3oXZjCoUfd?usp=sharing
+#  Marcos Rafael Martínez Cosío 7290201
+#  Clase 20.1 Fundamentos y aplicaciones de la Inteligencia Artificial
+#  Monterrey, N.L. 02 Agosto 2026
+#  Este notebook se encuentra compartido en:
+#    https://colab.research.google.com/drive/1A-t3I1ryrjH3jrX9v7SAJa3oXZjCoUfd?usp=sharing
 -->
 <!DOCTYPE html>
 <html lang="es">
@@ -70,7 +70,6 @@
         button:hover {
             background-color: #0b5ed7;
         }
-        /* Contenedor donde se renderizan las salidas de los gráficos */
         #plot-output {
             margin-top: 20px;
             background: white;
@@ -95,10 +94,10 @@
 </head>
 <body>
 
-    <p>Pronóstico Interactivo de Temperatura Mensual</p>
-    <p>Marcos Rafael Martínez Cosío 7290201
-Clase 20.1 Fundamentos y aplicaciones de la Inteligencia Artificial
-Monterrey, N.L. 02 Agosto 2026.</p>
+    <p><strong>Pronóstico Interactivo de Temperatura Mensual</strong></p>
+    <p>Marcos Rafael Martínez Cosío 7290201<br>
+    Clase 20.1 Fundamentos y aplicaciones de la Inteligencia Artificial<br>
+    Monterrey, N.L. 02 Agosto 2026.</p>
 
     <!-- Interfaz de Usuario Equivalente a Gradio en HTML -->
     <div class="control-panel">
@@ -141,20 +140,37 @@ Monterrey, N.L. 02 Agosto 2026.</p>
 import numpy as np
 import pandas as pd
 import matplotlib.pyplot as plt
+import io
+from pyodide.http import pyfetch
 from sklearn.ensemble import RandomForestRegressor
 from pyscript import window, display
 
-# 1. Carga de Datos Históricos
-
+# 1. Carga de Datos Históricos mediante pyfetch
 url_csv = 'https://raw.githubusercontent.com/gurney746/pronostico_temp_monterrey/refs/heads/main/tempmedia_conagua_01.csv'
-df_raw = pd.read_csv(url_csv)
-    
-# Datos sintéticos estructurados 
-fechas = pd.date_range(start='2010-01-01', end='2026-06-01', freq='MS')
-np.random.seed(42)
-temperaturas = 20 + 8 * np.sin(np.pi * fechas.month / 6) + np.random.normal(0, 1.5, len(fechas))
-df = pd.DataFrame({'temperatura': temperaturas}, index=fechas)
 
+async def cargar_datos():
+    try:
+        response = await pyfetch(url_csv)
+        if response.ok:
+            csv_data = await response.bytes()
+            return pd.read_csv(io.BytesIO(csv_data))
+    except Exception:
+        pass
+    
+    # Datos sintéticos en caso de que falle la conexión externa
+    fechas = pd.date_range(start='2010-01-01', end='2026-06-01', freq='MS')
+    np.random.seed(42)
+    temperaturas = 20 + 8 * np.sin(np.pi * fechas.month / 6) + np.random.normal(0, 1.5, len(fechas))
+    return pd.DataFrame({'temperatura': temperaturas}, index=fechas)
+
+# Cargar los datos de manera asíncrona
+df_raw = await cargar_datos()
+
+if isinstance(df_raw.index, pd.DatetimeIndex):
+    df = df_raw.copy()
+else:
+    fechas = pd.date_range(start='2010-01-01', periods=len(df_raw), freq='MS')
+    df = pd.DataFrame({'temperatura': df_raw.iloc[:, -1].values}, index=fechas)
 
 # 2. Ingeniería de Características
 df['mes'] = df.index.month
@@ -199,8 +215,7 @@ def get_features_for_prediction(current_df_history, target_year, target_month):
     return features_df
 
 # 5. Función principal gatillada por el botón HTML
-def ejecutar_prediccion(event):
-    # Leer valores de la interfaz HTML
+def ejecutar_prediccion(event=None):
     año_inicio = int(window.document.getElementById("anio_start").value)
     mes_inicio = int(window.document.getElementById("mes_start").value)
     temp_observada_inicio = float(window.document.getElementById("temp_obs").value)
@@ -208,11 +223,9 @@ def ejecutar_prediccion(event):
     df_for_forecasting = df[['temperatura']].copy()
     forecast_start_date = pd.to_datetime(f"{año_inicio}-{mes_inicio:02d}-01")
 
-    # Añadir dato inicial
     new_entry_data = pd.DataFrame({'temperatura': [temp_observada_inicio]}, index=[forecast_start_date])
     df_for_forecasting = pd.concat([df_for_forecasting, new_entry_data]).sort_index()
 
-    # Fechas de predicción
     end_date_forecast = pd.to_datetime("2030-12-01")
     current_date = forecast_start_date + pd.DateOffset(months=1)
 
@@ -264,7 +277,7 @@ def ejecutar_prediccion(event):
     window.document.getElementById("summary-output").innerText = summary
 
 # Ejecutar una primera vez al cargar la página
-ejecutar_prediccion(None)
+ejecutar_prediccion()
     </script>
 
 </body>
