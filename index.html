@@ -4,8 +4,6 @@
 #   Marcos Rafael Martínez Cosío 7290201
 #   Clase 20.1 Fundamentos y aplicaciones de la Inteligencia Artificial
 #   Monterrey, N.L. 02 Agosto 2026
-#   Este notebook se encuentra compartido en:
-#     https://colab.research.google.com/drive/1A-t3I1ryrjH3jrX9v7SAJa3oXZjCoUfd?usp=sharing
 -->
 <!DOCTYPE html>
 <html lang="es">
@@ -99,7 +97,7 @@
     Clase 20.1 Fundamentos y aplicaciones de la Inteligencia Artificial<br>
     Monterrey, N.L. 02 Agosto 2026.</p>
 
-    <!-- Interfaz de Usuario Equivalente a Gradio en HTML -->
+    <!-- Interfaz de Usuario HTML -->
     <div class="control-panel">
         <div class="control-group">
             <label for="anio_start">Año inicio:</label>
@@ -129,13 +127,9 @@
         <button py-click="ejecutar_prediccion">Calcular Pronóstico</button>
     </div>
 
-    <!-- Div objetivo donde se renderizará únicamente la salida visual del gráfico -->
-    <div id="plot-output">Cargando librerías y entrenando modelo... Por favor espere.</div>
-    
-    <!-- Resumen de texto -->
+    <div id="plot-output">Cargando y procesando datos reales... Espere un momento.</div>
     <div id="summary-output"></div>
 
-    <!-- Se añade 'async' al tipo de script para permitir el uso de 'await' al nivel superior -->
     <script type="py" async>
 import numpy as np
 import pandas as pd
@@ -145,76 +139,129 @@ from pyodide.http import pyfetch
 from sklearn.ensemble import RandomForestRegressor
 from pyscript import window, display
 
-# 1. Carga de Datos Históricos mediante pyfetch
 url_csv = 'https://raw.githubusercontent.com/gurney746/pronostico_temp_monterrey/refs/heads/main/tempmedia_conagua_01.csv'
 
-async def cargar_datos():
-    try:
-        response = await pyfetch(url_csv)
-        if response.ok:
-            csv_data = await response.bytes()
-            return pd.read_csv(io.BytesIO(csv_data))
-    except Exception:
-        pass
+async def cargar_y_procesar_csv():
+    response = await pyfetch(url_csv)
+    csv_bytes = await response.bytes()
     
-    # Datos sintéticos en caso de que falle la conexión externa
-    fechas = pd.date_range(start='2010-01-01', end='2026-06-01', freq='MS')
-    np.random.seed(42)
-    temperaturas = 20 + 8 * np.sin(np.pi * fechas.month / 6) + np.random.normal(0, 1.5, len(fechas))
-    return pd.DataFrame({'temperatura': temperaturas}, index=fechas)
+    # Intentar leer con detección de codificación
+    try:
+        df_raw = pd.read_csv(io.BytesIO(csv_bytes), encoding='utf-8')
+    except Exception:
+        df_raw = pd.read_csv(io.BytesIO(csv_bytes), encoding='latin-1')
 
-# Cargar los datos de manera asíncrona
-df_raw = await cargar_datos()
+    # Limpiar nombres de columnas
+    df_raw.columns = df_raw.columns.str.strip().str.upper()
 
-if isinstance(df_raw.index, pd.DatetimeIndex):
-    df = df_raw.copy()
-else:
-    fechas = pd.date_range(start='2010-01-01', periods=len(df_raw), freq='MS')
-    df = pd.DataFrame({'temperatura': df_raw.iloc[:, -1].values}, index=fechas)
+    # Identificar columna del año
+    col_anio = [c for c in df_raw.columns if 'AÑO' in c or 'ANIO' in c or 'YEAR' in c]
+    if col_anio:
+        anio_var = col_anio[0]
+    else:
+        anio_var = df_raw.columns[0]
+
+    # Mapeo de meses de CONAGUA
+    meses_map = {
+        'ENE': 1, 'FEB': 2, 'MAR': 3, 'ABR': 4, 'MAY': 5, 'JUN': 6,
+        'JUL': 7, 'AGO': 8, 'SEP': 9, 'OCT': 10, 'NOV': 11, 'DIC': 12,
+        'ENERO': 1, 'FEBRERO': 2, 'MARZO': 3, 'ABRIL': 4, 'MAYO': 5, 'JUNIO': 6,
+        'JULIO': 7, 'AGOSTO': 8, 'SEPTIEMBRE': 9, 'OCTUBRE': 10, 'NOVIEMBRE': 11, 'DICIEMBRE': 12
+    }
+
+    # Filtrar columnas que corresponden a meses
+    cols_meses = [c for c in df_raw.columns if c in meses_map]
+
+    if cols_meses:
+        # Transformar matriz (AÑO | ENE | FEB ...) a formato Serie de Tiempo
+        df_melted = df_raw.melt(id_vars=[anio_var], value_vars=cols_meses, var_name='Mes_Nombre', value_name='temperatura')
+        df_melted['Mes_Num'] = df_melted['Mes_Nombre'].map(meses_map)
+        
+        # Convertir a valores numéricos
+        df_melted[anio_var] = pd.to_numeric(df_melted[anio_var], errors='coerce')
+        df_melted['temperatura'] = pd.to_numeric(df_melted['temperatura'], errors='coerce')
+        df_melted.dropna(subset=[anio_var, 'Mes_Num', 'temperatura'], inplace=True)
+        
+        df_melted[anio_var] = df_melted[anio_var].astype(int)
+        df_melted['Mes_Num'] = df_melted['Mes_Num'].astype(int)
+
+        # Crear fecha real
+        df_melted['fecha'] = pd.to_datetime(
+            df_melted[anio_var].astype(str) + '-' + df_melted['Mes_Num'].astype(str).str.zfill(2) + '-01',
+            errors='coerce'
+        )
+        df_final = df_melted.dropna(subset=['fecha']).set_index('fecha').sort_index()[['temperatura']]
+    else:
+        # Caso alternativo si el CSV ya venía en formato de 2 columnas
+        col_temp = [c for c in df_raw.columns if 'TEMP' in c or 'VALOR' in c][0]
+        df_raw[col_temp] = pd.to_numeric(df_raw[col_temp], errors='coerce')
+        df_raw.dropna(inplace=True)
+        fechas = pd.date_range(start='2000-01-01', periods=len(df_raw), freq='MS')
+        df_final = pd.DataFrame({'temperatura': df_raw[col_temp].values}, index=fechas)
+
+    return df_final
+
+# Cargar DataFrame estructurado
+df = await cargar_y_procesar_csv()
 
 # 2. Ingeniería de Características
 df['mes'] = df.index.month
 df['año'] = df.index.year
-df['temp_mes_anterior'] = df['temperatura'].shift(1)
-df['temp_hace_2meses'] = df['temperatura'].shift(2)
-df['temp_hace_3meses'] = df['temperatura'].shift(3)
-df['temp_media_7meses'] = df['temperatura'].shift(1).rolling(window=7).mean()
+
+# Lags Anuales (1 a 5 años hacia atrás)
+df['temp_hace_1año'] = df['temperatura'].shift(12)
+df['temp_hace_2años'] = df['temperatura'].shift(24)
+df['temp_hace_3años'] = df['temperatura'].shift(36)
+df['temp_hace_4años'] = df['temperatura'].shift(48)
+df['temp_hace_5años'] = df['temperatura'].shift(60)
+
+# Media móvil de 24 meses (2 años) para evitar desperdiciar demasiados datos históricos
+df['temp_media_historica'] = df['temperatura'].shift(1).rolling(window=24, min_periods=12).mean()
+
 df.dropna(inplace=True)
 
 # 3. Entrenamiento del Modelo
-X = df[['mes', 'año', 'temp_mes_anterior', 'temp_hace_2meses', 'temp_hace_3meses', 'temp_media_7meses']]
+feature_cols = [
+    'mes', 'año', 
+    'temp_hace_1año', 'temp_hace_2años', 'temp_hace_3años', 'temp_hace_4años', 'temp_hace_5años',
+    'temp_media_historica'
+]
+
+X = df[feature_cols]
 y = df['temperatura']
 
-modelo_rf = RandomForestRegressor(n_estimators=50, max_depth=10, random_state=42)
+modelo_rf = RandomForestRegressor(n_estimators=100, max_depth=12, random_state=42)
 modelo_rf.fit(X, y)
 
-# 4. Helper Function para calcular lags
+# 4. Helper Function para predicción recursiva
 def get_features_for_prediction(current_df_history, target_year, target_month):
     target_date = pd.to_datetime(f"{target_year}-{target_month:02d}-01")
     data_for_lags = current_df_history[current_df_history.index < target_date]
 
-    if data_for_lags.empty:
+    if len(data_for_lags) < 60:
         return None
 
-    temp_mes_anterior = data_for_lags['temperatura'].iloc[-1]
-    temp_hace_2meses = data_for_lags['temperatura'].iloc[-2] if len(data_for_lags) >= 2 else np.nan
-    temp_hace_3meses = data_for_lags['temperatura'].iloc[-3] if len(data_for_lags) >= 3 else np.nan
-    
-    temps_7m = data_for_lags['temperatura'].iloc[-7:]
-    temp_media_7meses = temps_7m.mean() if len(temps_7m) == 7 else np.nan
+    temp_1a = data_for_lags['temperatura'].iloc[-12]
+    temp_2a = data_for_lags['temperatura'].iloc[-24]
+    temp_3a = data_for_lags['temperatura'].iloc[-36]
+    temp_4a = data_for_lags['temperatura'].iloc[-48]
+    temp_5a = data_for_lags['temperatura'].iloc[-60]
 
-    features_df = pd.DataFrame([{
+    temps_hist = data_for_lags['temperatura'].iloc[-24:]
+    temp_media_hist = temps_hist.mean()
+
+    return pd.DataFrame([{
         'mes': target_month,
         'año': target_year,
-        'temp_mes_anterior': temp_mes_anterior,
-        'temp_hace_2meses': temp_hace_2meses,
-        'temp_hace_3meses': temp_hace_3meses,
-        'temp_media_7meses': temp_media_7meses
+        'temp_hace_1año': temp_1a,
+        'temp_hace_2años': temp_2a,
+        'temp_hace_3años': temp_3a,
+        'temp_hace_4años': temp_4a,
+        'temp_hace_5años': temp_5a,
+        'temp_media_historica': temp_media_hist
     }])
 
-    return features_df
-
-# 5. Función principal gatillada por el botón HTML
+# 5. Ejecución del Pronóstico
 def ejecutar_prediccion(event=None):
     año_inicio = int(window.document.getElementById("anio_start").value)
     mes_inicio = int(window.document.getElementById("mes_start").value)
@@ -256,27 +303,28 @@ def ejecutar_prediccion(event=None):
 
     # Generación de la Gráfica
     fig, ax = plt.subplots(figsize=(10, 5))
-    ax.plot(df_for_forecasting.index, df_for_forecasting['temperatura'], label='Histórico + Pronóstico', color='#1f77b4')
-    ax.scatter(forecast_start_date, temp_observada_inicio, color='green', s=80, zorder=5, label='Temp. Observada Inicial')
-    ax.plot(predictions_df.index, predictions_df['temperatura'], label='Pronóstico RF', color='red', linestyle='--')
+    
+    # Graficar datos limpios reales
+    ax.plot(df.index, df['temperatura'], label='Histórico Real CONAGUA', color='#1f77b4', linewidth=1.5)
+    ax.scatter(forecast_start_date, temp_observada_inicio, color='green', s=90, zorder=5, label='Temp. Observada Inicial')
+    ax.plot(predictions_df.index, predictions_df['temperatura'], label='Pronóstico Random Forest', color='red', linestyle='--', linewidth=1.8)
 
-    ax.set_title('Pronóstico de Temperatura Mensual (Hasta 2030)')
+    ax.set_title('Pronóstico de Temperatura Mensual Monterrey')
     ax.set_xlabel('Fecha')
     ax.set_ylabel('Temperatura (°C)')
     ax.grid(True, linestyle=':', alpha=0.6)
     ax.legend()
     plt.tight_layout()
 
-    # Renderizar limpia la salida en el contenedor objetivo
     window.document.getElementById("plot-output").innerHTML = ""
     display(fig, target="plot-output")
 
-    # Mostrar resumen en texto
-    summary = f"Inicio: {mes_inicio}/{año_inicio} | Temp Inicial: {temp_observada_inicio}°C\n"
+    summary = f"Rango histórico cargado: {df.index.min().strftime('%Y-%m')} a {df.index.max().strftime('%Y-%m')}\n"
+    summary += f"Inicio del pronóstico: {mes_inicio}/{año_inicio} | Temp Inicial: {temp_observada_inicio}°C\n"
     summary += f"Última temperatura pronosticada (2030-12): {predictions_df['temperatura'].iloc[-1]:.2f}°C"
     window.document.getElementById("summary-output").innerText = summary
 
-# Ejecutar una primera vez al cargar la página
+# Ejecutar render inicial
 ejecutar_prediccion()
     </script>
 
